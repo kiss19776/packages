@@ -29,14 +29,15 @@ jobs:
         cd /openwrt
         echo "配置编译环境..."
         
+        # 使用带缩进的多行字符串
         cat > .config << 'CONFIG_EOF'
-CONFIG_TARGET_x86_64=y
-CONFIG_TARGET_x86_64_generic=y
-CONFIG_PACKAGE_luci-app-homepage=m
-CONFIG_PACKAGE_luci-app-openvpn-server=m
-CONFIG_PACKAGE_luci-app-openvpn-client=m
-CONFIG_LUCI_LANG_zh-cn=y
-CONFIG_EOF
+        CONFIG_TARGET_x86_64=y
+        CONFIG_TARGET_x86_64_generic=y
+        CONFIG_PACKAGE_luci-app-homepage=m
+        CONFIG_PACKAGE_luci-app-openvpn-server=m
+        CONFIG_PACKAGE_luci-app-openvpn-client=m
+        CONFIG_LUCI_LANG_zh-cn=y
+        CONFIG_EOF
         
         make defconfig
         
@@ -95,13 +96,14 @@ CONFIG_EOF
         cd /openwrt
         echo "配置编译环境..."
         
+        # 使用带缩进的多行字符串
         cat > .config << 'CONFIG_EOF'
-CONFIG_TARGET_aarch64_generic=y
-CONFIG_PACKAGE_luci-app-homepage=m
-CONFIG_PACKAGE_luci-app-openvpn-server=m
-CONFIG_PACKAGE_luci-app-openvpn-client=m
-CONFIG_LUCI_LANG_zh-cn=y
-CONFIG_EOF
+        CONFIG_TARGET_aarch64_generic=y
+        CONFIG_PACKAGE_luci-app-homepage=m
+        CONFIG_PACKAGE_luci-app-openvpn-server=m
+        CONFIG_PACKAGE_luci-app-openvpn-client=m
+        CONFIG_LUCI_LANG_zh-cn=y
+        CONFIG_EOF
         
         make defconfig
         
