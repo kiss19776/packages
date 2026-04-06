@@ -1,0 +1,146 @@
+<%
+    local fs = require "nixio.fs"
+    local util = require "luci.util"
+    local http = require "luci.http"
+    local dispatcher = require "luci.dispatcher"
+    
+    local ccd_dir = "/etc/openvpn/server/ccd"
+    local pass_file = "/etc/openvpn/server/psw-file"
+
+    local function get_auth_users()
+        local users = {}
+        if fs.access(pass_file) then
+            for line in io.lines(pass_file) do
+                local u = line:match("^([^%s]+)%s+")
+                if u then users[u] = true end
+            end
+        end
+        return users
+    end
+
+    local files = {}
+    if fs.stat(ccd_dir) then
+        for filename in fs.dir(ccd_dir) do
+            if filename ~= "." and filename ~= ".." then
+                local filepath = ccd_dir .. "/" .. filename
+                local stat = fs.stat(filepath)
+                local content = fs.readfile(filepath) or ""
+                local ip, mask = content:match("ifconfig%-push%s+(%d+%.%d+%.%d+%.%d+)%s+(%d+%.%d+%.%d+%.%d+)")
+                
+                local auth_users = get_auth_users()
+                local is_valid = auth_users[filename] and true or false
+
+                table.insert(files, {
+                    name = filename,
+                    ip = ip or "-",
+                    mask = mask or "-",
+                    mtime = stat and os.date("%Y-%m-%d %H:%M:%S", stat.mtime) or "-",
+                    valid = is_valid,
+                    content = content
+                })
+            end
+        end
+    end
+    
+    local delete_url = dispatcher.build_url("admin", "vpn", "openvpn-server", "ccd-delete")
+    -- 安全地序列化 JSON
+    local json_data = util.serialize_json(files or {})
+%>
+
+<style>
+    .ccd-table { width: 100%; border-collapse: collapse; margin-top: 10px; background: #fff; }
+    .ccd-table th, .ccd-table td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 14px; }
+    .ccd-table th { background-color: #f9f9f9; font-weight: bold; }
+    .badge-ok { color: #28a745; font-weight: bold; }
+    .badge-warn { color: #dc3545; font-weight: bold; }
+    .btn-small { padding: 4px 8px; font-size: 12px; text-decoration: none; color: #fff; background: #007bff; border-radius: 3px; display: inline-block; margin-right: 5px; }
+    .btn-danger { background: #dc3545; }
+    .btn-small:hover { opacity: 0.8; color: #fff; }
+</style>
+
+<table class="ccd-table">
+    <thead>
+        <tr>
+            <th><%:Username%></th>
+            <th><%:IP Address%></th>
+            <th><%:Status%></th>
+            <th><%:Modified%></th>
+            <th style="width: 150px;"><%:Actions%></th>
+        </tr>
+    </thead>
+    <tbody>
+        <% if not files or #files == 0 then %>
+        <tr>
+            <td colspan="5" style="text-align:center; padding: 20px;"><%:No CCD files found.%></td>
+        </tr>
+        <% else %>
+            <% for _, f in ipairs(files) do 
+                local status_badge = f.valid and '<span class="badge-ok">✓ Valid</span>' or '<span class="badge-warn">⚠️ No Auth</span>'
+            %>
+            <tr id="row-<%=f.name%>">
+                <td><strong><%=f.name%></strong></td>
+                <td><%=f.ip%> / <%=f.mask%></td>
+                <td><%=status_badge%></td>
+                <td><%=f.mtime%></td>
+                <td>
+                    <a href="#" class="btn-small" onclick="loadCcdData('<%=f.name%>'); return false;">
+                        <%:Edit%>
+                    </a>
+                    <a href="<%=delete_url%>?user=<%=http.urlencode(f.name)%>" class="btn-small btn-danger" onclick="return confirm('<%:Delete CCD file for%> <%=f.name%>?')">
+                        <%:Delete%>
+                    </a>
+                </td>
+            </tr>
+            <% end %>
+        <% end %>
+    </tbody>
+</table>
+
+<script type="text/javascript">
+    // 注入数据到前端
+    var ccdDatabase = <%=json_data%>;
+
+    function loadCcdData(username) {
+        var data = null;
+        if (!ccdDatabase) { alert('No data available'); return; }
+        
+        for(var i=0; i<ccdDatabase.length; i++) {
+            if(ccdDatabase[i].name === username) {
+                data = ccdDatabase[i];
+                break;
+            }
+        }
+        if(!data) {
+            alert('Configuration data not found for: ' + username);
+            return;
+        }
+        
+        var userField = document.getElementById('cbid.openvpn.ccd.username');
+        var ipField = document.getElementById('cbid.openvpn.ccd.fixed_ip');
+        var maskField = document.getElementById('cbid.openvpn.ccd.netmask');
+        var routeField = document.getElementById('cbid.openvpn.ccd.static_routes');
+        
+        if(userField) userField.value = data.name;
+        if(ipField && data.ip !== '-') ipField.value = data.ip;
+        if(maskField) maskField.value = data.mask || '255.255.255.0';
+        
+        if(routeField) {
+            var routes = "";
+            var lines = (data.content || "").split('\n');
+            for(var j=0; j<lines.length; j++) {
+                var l = lines[j].trim();
+                if(l.indexOf('iroute') === 0) {
+                    routes += l.replace('iroute', '').trim() + '\n';
+                }
+            }
+            routeField.value = routes.trim();
+        }
+        
+        window.scrollTo(0, 0);
+        if(userField) {
+            userField.style.backgroundColor = "#e8f0fe";
+            setTimeout(function(){ userField.style.backgroundColor = ""; }, 1000);
+        }
+        alert('<%:Loaded configuration for%>: ' + username);
+    }
+</script>

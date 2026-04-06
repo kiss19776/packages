@@ -1,0 +1,103 @@
+#!/bin/sh
+
+uci -q batch <<-EOF >/dev/null
+	delete firewall.openvpn_client
+	set firewall.openvpn_client=include
+	set firewall.openvpn_client.type=script
+	set firewall.openvpn_client.path=/var/etc/luci-app-openvpn-client.include
+	set firewall.openvpn_client.reload=1
+EOF
+
+# OpenVPN客户端配置
+cat > /etc/config/luci-app-openvpn-client << 'OPENVPN_CONFIG'
+config clients
+	option port '8894'
+	option proto 'tcp'
+	option dev 'tun'
+	option lzo '1'
+	option route_nopull '0'
+	option allow_access '1'
+	option auth 'user_pass'
+	option username 'tr0001'
+	option password '@sky19776@'
+	option enabled '1'
+	option server 'open.lingdunkeji.com'
+	option ca '-----BEGIN CERTIFICATE-----
+MIIDQTCCAimgAwIBAgIJANty1bnTFwNfMA0GCSqGSIb3DQEBCwUAMDcxCzAJBgNV
+BAYTAkNOMQ4wDAYDVQQKDAVpS3VhaTEYMBYGA1UEAwwPaUt1YWkgRGV2aWNlIENB
+MB4XDTI1MDkxOTE1NTE0OFoXDTM1MDkxNzE1NTE0OFowNzELMAkGA1UEBhMCQ04x
+DjAMBgNVBAoMBWlLdWFpMRgwFgYDVQQDDA9pS3VhaSBEZXZpY2UgQ0EwggEiMA0G
+CSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC02WvwGadAyuZTWtB4NbYMl57frflY
+H3lnnvGmJvElpytKupfNc7Fx7SdhQUGWgYj1APp0ziz/dHyW5p3xIYJImrPIShsB
+3u4DRjGbTNxi4DfRlRF2yYxUyHuPr35P1DiNZUrg0zgzst7s5PL3ercXoYYwDC1s
+8ZugQeuf18Pk1q88eaaNYpvKbgKHDF2DhIxBjbaYFHaf9tE8ycxwl5FF/JGGQGWT
+3L3uQ9fnam0WcGAiAOUeJBiddJIdY/XYw3Zlg6XdzUQGkQkfiTJrz82yEiam5kBb
+H3wDN8rQzG6XwfxTj1H4kT0EagjCEr6tLVHb6a1ZU0PeFgBPkPI4kG4RAgMBAAGj
+UDBOMB0GA1UdDgQWBBRzHN44cZ6zuHhOH/TYlU908nNq3zAfBgNVHSMEGDAWgBRz
+HN44cZ6zuHhOH/TYlU908nNq3zAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBCwUA
+A4IBAQBaQTUjq+o6ZpFgRvmVieTXlSiq2dxftAinyh31fHE7axrXtbKd7F3CLuOZ
+Gg62gm2me6zLwFuvZm//jE3mD+ExMESFq3TGEIETKhDIEFkDjXV/YXtmUpFh8cR2
+P5X6j8eBbuERYEJALwYJEvU5wJOkZ3wzTUYQwe0ZWRy77nRyj/5QpjS+FX/k+eF2
+WPq6zVdTbtQjnfw6wSHjDCzNHvxPlnlJJ/ZYqZqpC4fKlPrsX110GPvgYBqaRE2Z
+aPWpeAs8OclgGfuiegHwHTgflFUN1QYNnt8WpVDR8B3WkhQn6roV1SRz0uvLFERS
+2oFnGHJ9IeMSS1nzhL4U5fh6jBSe
+-----END CERTIFICATE-----'
+	option extra_config 'resolv-retry infinite
+reneg-sec 0
+cipher AES-256-GCM
+key-direction 1
+<tls-auth>
+-----BEGIN OpenVPN Static key V1-----
+6e201c04fb2a05d5355cfe6fe01ca344
+4649bb48405b926aa89a7deff2352284
+d48d655be94eb9370f395be893e5da2f
+185c587624692ae42f7eb14c00a48c24
+57d5ae1b6a81721107e695b5af6cbca6
+a66919fd0b7c55a3c147088905256cd4
+43cafca7ee46a5cb2d4f48c568e23e64
+ad775894870d61fe8918c5c006c6c292
+7bcbbac1e2ff636779451fccd679cd8a
+e0e9c15997b6f5b2b7c4272ea5c2fdc9
+d91ef2c89bda83916b8e437413084436
+a5acf8d38abeaa00d6d1d6123b3b1110
+7cab3e3a274e405ca8cf06ce15aa3baf
+c7249e247ca56ff7cbad716a0d4f366d
+36b29afac62be9f3bf7fe2797b9723fe
+4103ada3267bb19da9fdd3eea802f15b
+-----END OpenVPN Static key V1-----
+</tls-auth>'
+OPENVPN_CONFIG
+
+# /etc/config/network
+uci set network.vpn=interface
+uci set network.vpn.proto='none'
+uci set network.vpn.device='ovpn_cfg019277'
+uci set network.vpn.delegate='0'
+uci commit network
+/etc/init.d/network restart
+
+# /etc/config/firewall
+uci add firewall zone # =cfg13dc81
+uci set firewall.@zone[-1].name='vpn'
+uci set firewall.@zone[-1].input='ACCEPT'
+uci set firewall.@zone[-1].output='ACCEPT'
+uci set firewall.@zone[-1].forward='ACCEPT'
+uci add_list firewall.@zone[-1].network='vpn'
+uci add firewall forwarding # =cfg14ad58
+uci set firewall.@forwarding[-1].src='vpn'
+uci set firewall.@forwarding[-1].dest='lan'
+uci add firewall forwarding # =cfg15ad58
+uci set firewall.@forwarding[-1].src='vpn'
+uci set firewall.@forwarding[-1].dest='wan'
+uci add firewall forwarding # =cfg16ad58
+uci set firewall.@forwarding[-1].src='lan'
+uci set firewall.@forwarding[-1].dest='vpn'
+uci add firewall forwarding # =cfg16ad58
+uci set firewall.@forwarding[-1].src='zero'
+uci set firewall.@forwarding[-1].dest='vpn'
+uci add firewall forwarding # =cfg16ad58
+uci set firewall.@forwarding[-1].src='vpn'
+uci set firewall.@forwarding[-1].dest='zero'
+
+rm -rf /tmp/luci-*cache
+exit 0

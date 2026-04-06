@@ -1,0 +1,100 @@
+#!/bin/sh
+
+uci -q batch <<-EOF >/dev/null
+	delete network.vpn0
+	set network.vpn0=interface
+	set network.vpn0.device='tun0'
+	set network.vpn0.proto='none'
+	
+	commit network
+	delete firewall.openvpn
+	set firewall.openvpn=rule
+	set firewall.openvpn.name='openvpn'
+	set firewall.openvpn.target='ACCEPT'
+	set firewall.openvpn.src='wan'
+	set firewall.openvpn.proto='tcp udp'
+	set firewall.openvpn.dest_port="$openvpn_port"
+	delete firewall.vpn
+	set firewall.vpn=zone
+	set firewall.vpn.name='vpns'
+	set firewall.vpn.input='ACCEPT'
+	set firewall.vpn.forward='ACCEPT'
+	set firewall.vpn.output='ACCEPT'
+	set firewall.vpn.masq='1'
+	set firewall.vpn.network='vpn0'
+	delete firewall.vpntowan
+	set firewall.vpntowan=forwarding
+	set firewall.vpntowan.src='vpns'
+	set firewall.vpntowan.dest='wan'
+	delete firewall.vpntolan
+	set firewall.vpntolan=forwarding
+	set firewall.vpntolan.src='vpns'
+	set firewall.vpntolan.dest='lan'
+	delete firewall.lantovpn
+	set firewall.lantovpn=forwarding
+	set firewall.lantovpn.src='lan'
+	set firewall.lantovpn.dest='vpns'
+	commit firewall
+EOF
+
+chmod 0777 /etc/openvpn/server/checkpsw.sh
+
+rm -f /tmp/luci-indexcache
+
+cat <<EOF > /etc/config/openvpn
+
+config openvpn 'myvpn'
+	option dev 'tun'
+	option topology 'subnet'
+	option server '10.8.0.0 255.255.255.0'
+	option ca '/etc/openvpn/ca.crt'
+	option dh '/etc/openvpn/dh.pem'
+	option cert '/etc/openvpn/server.crt'
+	option key '/etc/openvpn/server.key'
+	option persist_key '1'
+	option persist_tun '1'
+	option max_clients '300'
+	option keepalive '10 120'
+	option verb '3'
+	option status '/var/log/openvpn_status.log'
+	option log '/tmp/openvpn.log'
+	option port '8894'
+	option comp_lzo 'yes'
+	option auth_user_pass_verify '/etc/openvpn/server/checkpsw.sh via-env'
+	option cipher 'AES-256-GCM'
+	option client_config_dir '/etc/openvpn/server/ccd'
+	option key_direction '0'
+	option tls_auth '/etc/openvpn/ta.key'
+	option proto 'tcp'
+	option verify_client_cert 'none'
+	option ddns 'openvpn.lingdunkeji.com'
+	option script_security '3'
+	option enabled '1'
+	option duplicate_cn '1'
+	option client_to_client '1'
+	option username_as_common_name '1'
+	option client_cert_not_required '1'
+
+EOF
+
+cat <<EOF > /etc/easy-rsa/vars
+set_var EASYRSA_OPENSSL	"openssl"
+set_var EASYRSA_KEY_SIZE	2048
+set_var EASYRSA_REQ_COUNTRY	"kiss19776"
+set_var EASYRSA_REQ_PROVINCE	"github"
+set_var EASYRSA_REQ_CITY	"github"
+set_var EASYRSA_REQ_ORG	"github"
+set_var EASYRSA_REQ_EMAIL	"kiss19776@github.com"
+set_var EASYRSA_REQ_OU	"github"
+set_var EASYRSA_CA_EXPIRE	3650
+set_var EASYRSA_CERT_EXPIRE	3650
+EOF
+
+openvpn_port="$(uci -q get openvpn.myvpn.port)"
+[ -z "$openvpn_port" ] && openvpn_port=8894
+
+if [ -f "/etc/config/openvpn-opkg" ] && ! grep -q "myvpn" /etc/config/openvpn 2>/dev/null; then
+    cp -f /etc/config/openvpn-opkg /etc/config/openvpn
+fi
+
+exit 0

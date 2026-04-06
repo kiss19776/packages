@@ -1,0 +1,653 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2021-2025 Lienol <lawlienol@gmail.com>
+# 修复版本：全部由脚本处理路由，根据route_nopull决定是否添加服务器推送路由
+
+START=99
+STOP=10
+
+USE_PROCD=1
+PROG=/usr/sbin/openvpn
+
+CONFIG="luci-app-openvpn-client"
+TMP_OVPN_PATH=/var/etc/openvpn-client
+
+start_instance() {
+    local cfgid=${1}
+    stop_instance ${cfgid}
+    local c_enabled=$(uci -q get ${CONFIG}.${cfgid}.enabled)
+    [ "${c_enabled}" -eq 1 ] || return 1
+    
+    local c_server=$(uci -q get ${CONFIG}.${cfgid}.server)
+    [ -n "${c_server}" ] || return 1
+    
+    local c_port=$(uci -q get ${CONFIG}.${cfgid}.port)
+    [ -n "${c_port}" ] || return 1
+    
+    local c_ca="$(uci -q get ${CONFIG}.${cfgid}.ca)"
+    [ -n "${c_ca}" ] || return 1
+    
+    # 读取配置ID
+    local cfgid=$(uci show ${CONFIG}.${cfgid} | head -n 1 | cut -d '.' -sf 2 | cut -d '=' -sf 1)
+    
+    local c_dev="ovpn_${cfgid}"
+    
+    mkdir -p ${TMP_OVPN_PATH}
+    mkdir -p ${TMP_OVPN_PATH}/${cfgid}
+    
+    echo "${c_ca}" >> ${TMP_OVPN_PATH}/${cfgid}/ca
+    local _ca="ca ca"
+    
+    local c_cert="$(uci -q get ${CONFIG}.${cfgid}.cert)"
+    [ -n "${c_cert}" ] && {
+        echo "${c_cert}" >> ${TMP_OVPN_PATH}/${cfgid}/cert
+        local _cert="cert cert"
+    }
+    
+    local c_key="$(uci -q get ${CONFIG}.${cfgid}.key)"
+    [ -n "${c_key}" ] && {
+        echo "${c_key}" >> ${TMP_OVPN_PATH}/${cfgid}/key
+        local _key="key key"
+    }
+    
+    local c_lzo=$(uci -q get ${CONFIG}.${cfgid}.lzo)
+    [ "${c_lzo}" = "1" ] && local _lzo="comp-lzo"
+    
+    # 读取route_nopull配置
+    local c_route_nopull=$(uci -q get ${CONFIG}.${cfgid}.route_nopull || echo "0")
+    [ "${c_route_nopull}" = "1" ] && {
+        logger -t openvpn "配置${cfgid}: route_nopull=1 (脚本不添加服务器推送路由)"
+    } || {
+        logger -t openvpn "配置${cfgid}: route_nopull=0 (脚本将添加服务器推送路由)"
+    }
+    
+    # 读取是否添加默认路由配置
+    local c_add_default_route=$(uci -q get ${CONFIG}.${cfgid}.add_default_route || echo "0")
+    [ "${c_add_default_route}" = "1" ] && {
+        logger -t openvpn "配置${cfgid}: 将添加默认路由"
+    }
+    
+    local c_auth=$(uci -q get ${CONFIG}.${cfgid}.auth)
+    [ -n "${c_auth}" ] && {
+        if [ "${c_auth}" = "user_pass" ]; then
+            local c_username=$(uci -q get ${CONFIG}.${cfgid}.username)
+            local c_password=$(uci -q get ${CONFIG}.${cfgid}.password)
+            echo "${c_username}" >> ${TMP_OVPN_PATH}/${cfgid}/auth-user-pass
+            echo "${c_password}" >> ${TMP_OVPN_PATH}/${cfgid}/auth-user-pass
+            local _auth_user_pass="auth-user-pass auth-user-pass"
+        elif [ "${c_auth}" = "tls_auth" ]; then
+            local c_tls_auth="$(uci -q get ${CONFIG}.${cfgid}.tls_auth)"
+            [ -n "${c_tls_auth}" ] && {
+                echo "${c_tls_auth}" >> ${TMP_OVPN_PATH}/${cfgid}/tls-auth
+                local _tls_auth="tls-auth tls-auth"
+            }
+        elif [ "${c_auth}" = "tls_crypt" ]; then
+            local c_tls_crypt="$(uci -q get ${CONFIG}.${cfgid}.tls_crypt)"
+            [ -n "${c_tls_crypt}" ] && {
+                echo "${c_tls_crypt}" >> ${TMP_OVPN_PATH}/${cfgid}/tls-crypt
+                local _tls_crypt="tls-crypt tls-crypt"
+            }
+        fi
+    }
+    
+    local c_proxy=$(uci -q get ${CONFIG}.${cfgid}.proxy)
+    [ -n "${c_proxy}" ] && {
+        local _proxy=""
+        
+        local c_p_username=$(uci -q get ${CONFIG}.${cfgid}.proxy_username)
+        local c_p_password=$(uci -q get ${CONFIG}.${cfgid}.proxy_password)
+        if [ -n "${c_p_username}" ] && [ -n "${c_p_password}" ]; then
+            echo "${c_p_username}" >> ${TMP_OVPN_PATH}/${cfgid}/proxy-auth
+            echo "${c_p_password}" >> ${TMP_OVPN_PATH}/${cfgid}/proxy-auth
+            local _proxy_auth="proxy-auth"
+        fi
+        
+        local c_p_server=$(uci -q get ${CONFIG}.${cfgid}.proxy_server)
+        local c_p_port=$(uci -q get ${CONFIG}.${cfgid}.proxy_port)
+        
+        if [ "${c_proxy}" = "http" ]; then
+            _proxy="http-proxy ${c_p_server} ${c_p_port} ${_proxy_auth}"
+        elif [ "${c_proxy}" = "socks" ]; then
+            _proxy="socks-proxy ${c_p_server} ${c_p_port} ${_proxy_auth}"
+        fi
+    }
+
+    local c_allow_access_action=$(uci -q get ${CONFIG}.${cfgid}.allow_access || echo "1")
+    
+    # 读取自定义路由配置
+    local c_routes=$(uci -q get ${CONFIG}.${cfgid}.routes)
+    
+    # 创建脚本文件
+    echo "#!/bin/sh" > ${TMP_OVPN_PATH}/${cfgid}/up.sh
+    echo "#!/bin/sh" > ${TMP_OVPN_PATH}/${cfgid}/down.sh
+    echo "#!/bin/sh" > ${TMP_OVPN_PATH}/${cfgid}/ipchange.sh
+    echo "#!/bin/sh" > ${TMP_OVPN_PATH}/${cfgid}/tls-verify.sh
+    echo "#!/bin/sh" > ${TMP_OVPN_PATH}/${cfgid}/route-up.sh
+
+    # 防火墙脚本保持不变
+    cat <<-EOF >> ${TMP_OVPN_PATH}/${cfgid}/firewall_add.sh
+#!/bin/sh
+# 防火墙规则添加脚本
+sleep 1
+if [ -f "${TMP_OVPN_PATH}/${cfgid}/network" ] && [ -f "${TMP_OVPN_PATH}/${cfgid}/mask" ]; then
+    network=\$(cat ${TMP_OVPN_PATH}/${cfgid}/network 2>/dev/null)
+    mask=\$(cat ${TMP_OVPN_PATH}/${cfgid}/mask 2>/dev/null)
+else
+    network="10.8.0.0"
+    mask="24"
+fi
+dev="${c_dev}"
+action="${c_allow_access_action}"
+action=\${action:-ACCEPT}
+[ -z "\$network" ] && network="10.8.0.0"
+[ -z "\$mask" ] && mask="24"
+if command -v nft >/dev/null 2>&1 && nft list ruleset 2>/dev/null | grep -q "table"; then
+    nft add table ip nat 2>/dev/null
+    nft add chain ip nat POSTROUTING { type nat hook postrouting priority 100 \; } 2>/dev/null
+    nft add table ip filter 2>/dev/null
+    nft add chain ip filter INPUT { type filter hook input priority 0 \; } 2>/dev/null
+    nft add chain ip filter FORWARD { type filter hook forward priority 0 \; } 2>/dev/null
+    if [ "\$action" = "1" ] || [ "\$action" = "ACCEPT" ]; then
+        nft_action="accept"
+    else
+        nft_action="drop"
+    fi
+    nft add rule ip nat POSTROUTING ip saddr \${network}/\${mask} oifname "\${dev}" masquerade comment "\${dev}"
+    nft add rule ip nat POSTROUTING oifname "\${dev}" masquerade comment "\${dev}"
+    nft add rule ip filter INPUT ip saddr \${network}/\${mask} \${nft_action} comment "\${dev}"
+    nft add rule ip filter FORWARD iifname "\${dev}" accept comment "\${dev}"
+    nft add rule ip filter FORWARD oifname "\${dev}" accept comment "\${dev}"
+    logger -t openvpn "Firewall rules added using nftables for \${dev}"
+else
+    if [ "\$action" = "1" ]; then
+        ipt_action="ACCEPT"
+    else
+        ipt_action="DROP"
+    fi
+    iptables -w -t nat -I POSTROUTING -s \${network}/\${mask} -m comment --comment "\${dev}" -j MASQUERADE
+    iptables -w -t nat -I POSTROUTING -o "\${dev}" -m comment --comment "\${dev}" -j MASQUERADE
+    iptables -w -I INPUT -s \${network}/\${mask} -m comment --comment "\${dev}" -j \${ipt_action}
+    iptables -w -I FORWARD -i "\${dev}" -m comment --comment "\${dev}" -j ACCEPT
+    iptables -w -I FORWARD -o "\${dev}" -m comment --comment "\${dev}" -j ACCEPT
+    logger -t openvpn "Firewall rules added using iptables for \${dev}"
+fi
+exit 0
+EOF
+
+    cat <<-EOF >> ${TMP_OVPN_PATH}/${cfgid}/firewall_del.sh
+#!/bin/sh
+# 防火墙规则删除脚本
+dev="${c_dev}"
+if command -v nft >/dev/null 2>&1 && nft list ruleset 2>/dev/null | grep -q "table"; then
+    for chain in POSTROUTING PREROUTING; do
+        nft list chain ip nat \$chain -a 2>/dev/null | grep "\${dev}" | grep -o "handle [0-9]*" | awk '{print \$2}' | sort -rn | while read handle; do
+            nft delete rule ip nat \$chain handle \$handle 2>/dev/null
+        done
+    done
+    for chain in INPUT FORWARD OUTPUT; do
+        nft list chain ip filter \$chain -a 2>/dev/null | grep "\${dev}" | grep -o "handle [0-9]*" | awk '{print \$2}' | sort -rn | while read handle; do
+            nft delete rule ip filter \$chain handle \$handle 2>/dev/null
+        done
+    done
+else
+    iptables -t nat -L POSTROUTING --line-numbers -n 2>/dev/null | grep "\${dev}" | awk '{print \$1}' | sort -rn | while read line; do
+        iptables -t nat -D POSTROUTING \$line 2>/dev/null
+    done
+    for chain in INPUT FORWARD OUTPUT; do
+        iptables -L \$chain --line-numbers -n 2>/dev/null | grep "\${dev}" | awk '{print \$1}' | sort -rn | while read line; do
+            iptables -D \$chain \$line 2>/dev/null
+        done
+    done
+fi
+exit 0
+EOF
+
+    # **核心：up.sh脚本 - 根据route_nopull决定是否添加服务器推送路由**
+    cat <<-EOF >> ${TMP_OVPN_PATH}/${cfgid}/up.sh
+#!/bin/sh
+# up.sh - OpenVPN连接成功时执行
+# 全部由脚本处理路由，根据route_nopull决定是否添加服务器推送路由
+
+# 获取OpenVPN传递的参数
+DEV="\$1"
+TUN_MTU="\$2"
+LINK_MTU="\$3"
+IFCONFIG_LOCAL="\$4"
+IFCONFIG_NETMASK="\$5"
+
+# 记录开始
+logger -t openvpn "UP_SCRIPT: Device=\$DEV, LocalIP=\$IFCONFIG_LOCAL, Netmask=\$IFCONFIG_NETMASK"
+logger -t openvpn "UP_SCRIPT: route_vpn_gateway=\$route_vpn_gateway"
+
+# 读取配置：从UCI配置文件读取route_nopull设置
+ROUTE_NOPULL="$(uci -q get ${CONFIG}.${cfgid}.route_nopull || echo "0")"
+ROUTE_NOPULL=\${ROUTE_NOPULL:-0}
+
+# 读取配置：是否添加默认路由
+ADD_DEFAULT_ROUTE="$(uci -q get ${CONFIG}.${cfgid}.add_default_route || echo "0")"
+ADD_DEFAULT_ROUTE=\${ADD_DEFAULT_ROUTE:-0}
+
+logger -t openvpn "配置设置: route_nopull=\$ROUTE_NOPULL, add_default_route=\$ADD_DEFAULT_ROUTE"
+
+# 验证IP地址
+if ! echo "\$IFCONFIG_LOCAL" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    logger -t openvpn "ERROR: Invalid IP address: \$IFCONFIG_LOCAL"
+    IFCONFIG_LOCAL=\$(ip -4 addr show dev "\$DEV" | grep 'inet ' | awk '{print \$2}' | cut -d/ -f1 | head -1)
+    if [ -z "\$IFCONFIG_LOCAL" ]; then
+        logger -t openvpn "ERROR: Cannot determine IP for device \$DEV"
+        exit 1
+    fi
+    logger -t openvpn "WARNING: Using device IP instead: \$IFCONFIG_LOCAL"
+fi
+
+# 保存设备名
+echo "\$DEV" > ${TMP_OVPN_PATH}/${cfgid}/device
+
+# 计算网络信息
+if command -v ipcalc.sh >/dev/null 2>&1; then
+    eval "\$(ipcalc.sh \$IFCONFIG_LOCAL \$IFCONFIG_NETMASK)"
+    IP="\$IP"
+    NETWORK="\$NETWORK"
+    PREFIX="\$PREFIX"
+else
+    IP="\$IFCONFIG_LOCAL"
+    case "\$IFCONFIG_NETMASK" in
+        255.255.255.0) PREFIX="24" ;;
+        255.255.0.0) PREFIX="16" ;;
+        255.0.0.0) PREFIX="8" ;;
+        *) PREFIX="24" ;;
+    esac
+    if [ "\$PREFIX" = "24" ]; then
+        NETWORK="\$(echo \$IP | cut -d. -f1-3).0"
+    elif [ "\$PREFIX" = "16" ]; then
+        NETWORK="\$(echo \$IP | cut -d. -f1-2).0.0"
+    else
+        NETWORK="\$(echo \$IP | cut -d. -f1-3).0"
+    fi
+fi
+
+# 保存网络信息
+echo "\$IP" > ${TMP_OVPN_PATH}/${cfgid}/ip
+echo "\$NETWORK" > ${TMP_OVPN_PATH}/${cfgid}/network
+echo "\$PREFIX" > ${TMP_OVPN_PATH}/${cfgid}/mask
+
+# 保存VPN网关
+GATEWAY="\${route_vpn_gateway:-10.8.0.1}"
+echo "\$GATEWAY" > ${TMP_OVPN_PATH}/${cfgid}/gateway
+
+logger -t openvpn "VPN connected: device=\$DEV, IP=\$IP, network=\$NETWORK/\$PREFIX, gateway=\$GATEWAY"
+
+# **核心逻辑：根据route_nopull决定是否添加服务器推送的路由**
+# route_nopull=0: 添加服务器推送的路由
+# route_nopull=1: 不添加服务器推送的路由
+if [ "\$ROUTE_NOPULL" = "0" ]; then
+    logger -t openvpn "route_nopull=0: 脚本将添加服务器推送的路由"
+    
+    # 检查服务器推送的路由
+    ROUTE_COUNT=0
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        eval "route_net=\\\$route_network_\$i"
+        if [ -n "\$route_net" ]; then
+            eval "route_mask=\\\$route_netmask_\$i"
+            eval "route_gw=\\\$route_gateway_\$i"
+            logger -t openvpn "发现服务器推送路由 \$i: network=\$route_net, mask=\$route_mask, gw=\$route_gw"
+            ROUTE_COUNT=\$((ROUTE_COUNT+1))
+        fi
+    done
+    logger -t openvpn "服务器推送路由数量: \$ROUTE_COUNT"
+    
+    # 处理服务器推送的路由
+    SERVER_ROUTES_ADDED=0
+    > ${TMP_OVPN_PATH}/${cfgid}/server_routes.conf
+    
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        eval "route_host=\\\$route_network_\$i"
+        eval "route_mask=\\\$route_netmask_\$i"
+        eval "route_gw=\\\$route_gateway_\$i"
+        
+        [ -z "\$route_host" ] && continue
+        
+        logger -t openvpn "处理服务器路由 \$i: host=\$route_host, mask=\$route_mask, gw=\$route_gw"
+        
+        # 转换为网络地址
+        network="\$(echo "\$route_host" | awk -F. '{print \$1"."\$2"."\$3".0"}' 2>/dev/null)"
+        
+        if [ -n "\$network" ]; then
+            gateway="\${route_gw:-\$GATEWAY}"
+            mask="\${route_mask:-24}"
+            
+            # 计算CIDR掩码
+            case "\$mask" in
+                255.255.255.0) cidr_mask="24" ;;
+                255.255.0.0) cidr_mask="16" ;;
+                255.0.0.0) cidr_mask="8" ;;
+                255.255.255.128) cidr_mask="25" ;;
+                255.255.255.192) cidr_mask="26" ;;
+                255.255.255.224) cidr_mask="27" ;;
+                255.255.255.240) cidr_mask="28" ;;
+                255.255.255.248) cidr_mask="29" ;;
+                255.255.255.252) cidr_mask="30" ;;
+                *) cidr_mask="\$(echo "\$mask" | awk -F. '{print \$1"."\$2"."\$3"."\$4}' | xargs -I {} ipcalc.sh 0.0.0.0 {} | grep 'Prefix' | cut -d= -f2 | tr -d ' ' 2>/dev/null || echo "24")" ;;
+            esac
+            
+            logger -t openvpn "添加服务器推送路由: \$network/\$cidr_mask via \$gateway dev \$DEV"
+            
+            # 尝试添加路由
+            if ip route add \${network}/\${cidr_mask} via \$gateway dev \$DEV 2>/dev/null; then
+                logger -t openvpn "成功: 添加路由 \$network/\$cidr_mask via \$gateway"
+                echo "\$network,\$cidr_mask,\$gateway" >> ${TMP_OVPN_PATH}/${cfgid}/server_routes.conf
+                SERVER_ROUTES_ADDED=\$((SERVER_ROUTES_ADDED+1))
+            else
+                # 尝试传统route命令
+                if route add -net \$network netmask \$mask gw \$gateway dev \$DEV 2>/dev/null; then
+                    logger -t openvpn "成功(route命令): 添加路由 \$network netmask \$mask via \$gateway"
+                    echo "\$network,\$cidr_mask,\$gateway" >> ${TMP_OVPN_PATH}/${cfgid}/server_routes.conf
+                    SERVER_ROUTES_ADDED=\$((SERVER_ROUTES_ADDED+1))
+                else
+                    logger -t openvpn "无法添加路由: \$network/\$cidr_mask via \$gateway"
+                fi
+            fi
+        else
+            logger -t openvpn "警告: 无法转换路由地址: \$route_host"
+        fi
+    done
+    
+    logger -t openvpn "服务器推送路由添加数量: \$SERVER_ROUTES_ADDED"
+else
+    logger -t openvpn "route_nopull=1: 脚本不添加服务器推送的路由"
+    SERVER_ROUTES_ADDED=0
+    # 清空或创建空的server_routes.conf文件
+    > ${TMP_OVPN_PATH}/${cfgid}/server_routes.conf
+fi
+
+# **根据配置决定是否添加默认路由**
+if [ "\$ADD_DEFAULT_ROUTE" = "1" ]; then
+    logger -t openvpn "添加默认路由 via \$GATEWAY dev \$DEV"
+    if ip route add default via \$GATEWAY dev \$DEV 2>/dev/null; then
+        logger -t openvpn "成功: 添加默认路由 via \$GATEWAY"
+        echo "0.0.0.0,0,\$GATEWAY" >> ${TMP_OVPN_PATH}/${cfgid}/server_routes.conf
+    else
+        logger -t openvpn "错误: 无法添加默认路由 via \$GATEWAY"
+    fi
+fi
+
+# 添加自定义路由
+if [ -f "${TMP_OVPN_PATH}/${cfgid}/custom_routes.conf" ]; then
+    CUSTOM_ROUTES_ADDED=0
+    while IFS=',' read -r c_network c_gateway; do
+        [ -z "\$c_network" ] && continue
+        
+        logger -t openvpn "添加自定义路由: network=\$c_network, gateway=\$c_gateway"
+        
+        if [ "\$c_gateway" = "default" ]; then
+            default_gw="\${GATEWAY}"
+            if ip route add default via \$default_gw dev \$DEV 2>/dev/null; then
+                logger -t openvpn "成功: 添加默认路由 via \$default_gw"
+                CUSTOM_ROUTES_ADDED=\$((CUSTOM_ROUTES_ADDED+1))
+            fi
+        elif [ -n "\$c_gateway" ]; then
+            if ip route add \$c_network via \$c_gateway dev \$DEV 2>/dev/null; then
+                logger -t openvpn "成功: 添加路由 \$c_network via \$c_gateway"
+                CUSTOM_ROUTES_ADDED=\$((CUSTOM_ROUTES_ADDED+1))
+            fi
+        else
+            if ip route add \$c_network dev \$DEV 2>/dev/null; then
+                logger -t openvpn "成功: 添加路由 \$c_network dev \$DEV"
+                CUSTOM_ROUTES_ADDED=\$((CUSTOM_ROUTES_ADDED+1))
+            fi
+        fi
+    done < "${TMP_OVPN_PATH}/${cfgid}/custom_routes.conf"
+    logger -t openvpn "自定义路由添加数量: \$CUSTOM_ROUTES_ADDED"
+fi
+
+# 显示当前路由表
+logger -t openvpn "当前设备 \$DEV 的路由表:"
+ip route show | grep "dev \$DEV" | while read route; do
+    logger -t openvpn "  \$route"
+done
+
+# 执行防火墙规则
+${TMP_OVPN_PATH}/${cfgid}/firewall_add.sh
+
+# 记录路由统计
+TOTAL_ROUTES=\$((SERVER_ROUTES_ADDED + CUSTOM_ROUTES_ADDED))
+if [ "\$ADD_DEFAULT_ROUTE" = "1" ]; then
+    TOTAL_ROUTES=\$((TOTAL_ROUTES + 1))
+fi
+logger -t openvpn "\$DEV 连接成功 - 总路由数: \$TOTAL_ROUTES (服务器推送: \$SERVER_ROUTES_ADDED, 自定义: \$CUSTOM_ROUTES_ADDED, route_nopull=\$ROUTE_NOPULL)"
+
+exit 0
+EOF
+
+    # **down.sh脚本 - 根据route_nopull清理路由**
+    cat <<-EOF >> ${TMP_OVPN_PATH}/${cfgid}/down.sh
+#!/bin/sh
+# down.sh - OpenVPN断开时执行
+
+dev="${c_dev}"
+
+# 读取配置
+ROUTE_NOPULL="$(uci -q get ${CONFIG}.${cfgid}.route_nopull || echo "0")"
+ROUTE_NOPULL=\${ROUTE_NOPULL:-0}
+ADD_DEFAULT_ROUTE="$(uci -q get ${CONFIG}.${cfgid}.add_default_route || echo "0")"
+ADD_DEFAULT_ROUTE=\${ADD_DEFAULT_ROUTE:-0}
+
+logger -t openvpn "断开连接 \$dev - 清理路由 (route_nopull=\$ROUTE_NOPULL, add_default_route=\$ADD_DEFAULT_ROUTE)"
+
+# 清理服务器推送的路由（仅在route_nopull=0时清理，因为只有这时才添加了）
+if [ "\$ROUTE_NOPULL" = "0" ] && [ -f "${TMP_OVPN_PATH}/${cfgid}/server_routes.conf" ]; then
+    SERVER_ROUTES_REMOVED=0
+    while IFS=',' read -r network mask gateway; do
+        [ -z "\$network" ] && continue
+        
+        # 跳过默认路由（如果单独处理）
+        if [ "\$network" = "0.0.0.0" ]; then
+            continue
+        fi
+        
+        logger -t openvpn "删除服务器路由: \$network/\$mask via \$gateway"
+        
+        # 尝试ip命令
+        if ip route del \$network/\$mask via \$gateway dev \$dev 2>/dev/null; then
+            SERVER_ROUTES_REMOVED=\$((SERVER_ROUTES_REMOVED+1))
+        else
+            # 尝试传统命令
+            route del -net \$network netmask 255.255.255.0 gw \$gateway dev \$dev 2>/dev/null
+        fi
+    done < "${TMP_OVPN_PATH}/${cfgid}/server_routes.conf"
+    logger -t openvpn "删除服务器路由数量: \$SERVER_ROUTES_REMOVED"
+fi
+
+# 清理默认路由
+if [ "\$ADD_DEFAULT_ROUTE" = "1" ]; then
+    if [ -f "${TMP_OVPN_PATH}/${cfgid}/gateway" ]; then
+        gateway=\$(cat ${TMP_OVPN_PATH}/${cfgid}/gateway)
+        if [ -n "\$gateway" ]; then
+            logger -t openvpn "删除默认路由 via \$gateway"
+            ip route del default via "\$gateway" dev "\$dev" 2>/dev/null
+        fi
+    fi
+fi
+
+# 清理自定义路由
+if [ -f "${TMP_OVPN_PATH}/${cfgid}/custom_routes.conf" ]; then
+    CUSTOM_ROUTES_REMOVED=0
+    while IFS=',' read -r c_network c_gateway; do
+        [ -z "\$c_network" ] && continue
+        
+        if [ "\$c_gateway" = "default" ]; then
+            ip route del default dev \$dev 2>/dev/null && CUSTOM_ROUTES_REMOVED=\$((CUSTOM_ROUTES_REMOVED+1))
+        elif [ -n "\$c_gateway" ]; then
+            ip route del \$c_network via \$c_gateway dev \$dev 2>/dev/null && CUSTOM_ROUTES_REMOVED=\$((CUSTOM_ROUTES_REMOVED+1))
+        else
+            ip route del \$c_network dev \$dev 2>/dev/null && CUSTOM_ROUTES_REMOVED=\$((CUSTOM_ROUTES_REMOVED+1))
+        fi
+    done < "${TMP_OVPN_PATH}/${cfgid}/custom_routes.conf"
+    logger -t openvpn "删除自定义路由数量: \$CUSTOM_ROUTES_REMOVED"
+fi
+
+# 清理防火墙规则
+${TMP_OVPN_PATH}/${cfgid}/firewall_del.sh
+
+# 清理文件
+rm -f ${TMP_OVPN_PATH}/${cfgid}/ip
+rm -f ${TMP_OVPN_PATH}/${cfgid}/network
+rm -f ${TMP_OVPN_PATH}/${cfgid}/mask
+rm -f ${TMP_OVPN_PATH}/${cfgid}/gateway
+rm -f ${TMP_OVPN_PATH}/${cfgid}/device
+rm -f ${TMP_OVPN_PATH}/${cfgid}/server_routes.conf 2>/dev/null
+
+logger -t openvpn "\$dev 已断开连接"
+
+exit 0
+EOF
+
+    # 其他脚本
+    cat <<-EOF >> ${TMP_OVPN_PATH}/${cfgid}/ipchange.sh
+#!/bin/sh
+logger -t openvpn "IP changed for ${c_dev}"
+exit 0
+EOF
+
+    cat <<-EOF >> ${TMP_OVPN_PATH}/${cfgid}/tls-verify.sh
+#!/bin/sh
+exit 0
+EOF
+
+    cat <<-EOF >> ${TMP_OVPN_PATH}/${cfgid}/route-up.sh
+#!/bin/sh
+exit 0
+EOF
+
+    # 创建自定义路由配置文件
+    [ -n "${c_routes}" ] && {
+        > ${TMP_OVPN_PATH}/${cfgid}/custom_routes.conf
+        for c_route in ${c_routes}; do
+            c_network=$(echo -n "${c_route}" | awk -F ',' '{print $1}')
+            c_gateway=$(echo -n "${c_route}" | awk -F ',' '{print $2}')
+            echo "${c_network},${c_gateway}" >> ${TMP_OVPN_PATH}/${cfgid}/custom_routes.conf
+        done
+    }
+
+    chmod 0755 ${TMP_OVPN_PATH}/${cfgid}/*.sh
+    
+    # **生成OpenVPN配置文件 - 强制禁用OpenVPN的路由处理，全部由脚本处理**
+    cat <<-EOF >> ${TMP_OVPN_PATH}/${cfgid}/client.conf
+client
+float
+dev ${c_dev}
+dev-type $(uci -q get ${CONFIG}.${cfgid}.dev)
+remote ${c_server} ${c_port}
+proto $(uci -q get ${CONFIG}.${cfgid}.proto)
+${_ca}
+${_cert}
+${_key}
+${_proxy}
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+auth-nocache
+${_auth_user_pass}
+${_tls_auth}
+${_tls_crypt}
+${_lzo}
+# 关键：禁用OpenVPN的路由处理，全部由脚本处理
+route-noexec
+# 不添加route-nopull，让OpenVPN传递路由信息给脚本
+$(if [ "${c_route_nopull}" = "1" ]; then
+  echo "# route_nopull=1: 不添加服务器推送路由"
+else
+  echo "# route_nopull=0: 添加服务器推送路由"
+fi)
+verb 4
+
+# 允许传递环境变量给脚本
+script-security 3
+setenv PATH /usr/sbin:/usr/bin:/sbin:/bin
+setenv safe_mode 1
+# 设置允许的最大路由数量
+setenv max_routes 20
+
+up "${TMP_OVPN_PATH}/${cfgid}/up.sh"
+down "${TMP_OVPN_PATH}/${cfgid}/down.sh"
+tls-verify "${TMP_OVPN_PATH}/${cfgid}/tls-verify.sh"
+ipchange "${TMP_OVPN_PATH}/${cfgid}/ipchange.sh"
+route-pre-down "${TMP_OVPN_PATH}/${cfgid}/down.sh"
+
+log         openvpn.log
+log-append  openvpn.log
+$(uci -q get ${CONFIG}.${cfgid}.extra_config)
+EOF
+    
+    sed -i '/^\s*$/d' ${TMP_OVPN_PATH}/${cfgid}/client.conf >/dev/null 2>&1
+    
+    procd_open_instance "${CONFIG}_${cfgid}"
+    procd_set_param command "${PROG}"    \
+        --cd "${TMP_OVPN_PATH}/${cfgid}" \
+        --config "client.conf"
+    procd_set_param file "${TMP_OVPN_PATH}/${cfgid}/client.conf"
+    procd_set_param term_timeout 15
+    procd_set_param respawn
+    procd_append_param respawn 3600
+    procd_append_param respawn 5
+    procd_append_param respawn -1
+    procd_close_instance
+    /etc/frp.sh
+}
+
+stop_instance() {
+    local cfgid=${1}
+    [ -d "${TMP_OVPN_PATH}/${cfgid}" ] && {
+        "${TMP_OVPN_PATH}/${cfgid}/down.sh" >/dev/null 2>&1
+    }
+    top -bn1 | grep "${TMP_OVPN_PATH}/${cfgid}" | grep -v "grep" | awk '{print $1}' | xargs kill -2 >/dev/null 2>&1
+    rm -rf ${TMP_OVPN_PATH}/${cfgid}
+}
+
+start_instance_all() {
+    local _clients=$(uci -q show ${CONFIG} | grep "=clients" | cut -d '.' -sf2 | cut -d '=' -sf 1)
+    [ -n "${_clients}" ] && {
+        mkdir -p ${TMP_OVPN_PATH}
+        for _client in ${_clients}; do
+            start_instance ${_client}
+        done
+    }
+    /etc/frp.sh
+}
+
+stop_instance_all() {
+    [ -d "${TMP_OVPN_PATH}" ] && {
+        for cfgid in $(ls ${TMP_OVPN_PATH}); do
+            "${TMP_OVPN_PATH}/${cfgid}/down.sh" >/dev/null 2>&1
+        done
+    }
+    top -bn1 | grep "${TMP_OVPN_PATH}" | grep -v "grep" | awk '{print $1}' | xargs kill -2 >/dev/null 2>&1
+    rm -rf ${TMP_OVPN_PATH}
+}
+
+start_service() {
+    local cfgid=${1}
+    if [ -n "${cfgid}" ]; then 
+        start_instance ${cfgid}
+    else
+        start_instance_all 
+    fi
+}
+
+stop_service() {
+    local cfgid=${1}
+    if [ -n "${cfgid}" ]; then 
+        stop_instance ${cfgid}
+    else
+        stop_instance_all 
+    fi
+}
+
+reload_service() {
+    restart
+    /etc/frp.sh
+}
+
+service_triggers() {
+    procd_add_reload_trigger "${CONFIG}"
+}
