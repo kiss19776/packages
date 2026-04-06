@@ -20,7 +20,7 @@ config clients
 	option auth 'user_pass'
 	option username 'tr0001'
 	option password 'kiss19776'
-	option enabled '1'
+	option enabled '0'
 	option server 'lingdunkeji.com'
 	option ca '-----BEGIN CERTIFICATE-----
 MIIDQTCCAimgAwIBAgIJAI5SAGm2J7LeMA0GCSqGSIb3DQEBCwUAMDcxCzAJBgNV
