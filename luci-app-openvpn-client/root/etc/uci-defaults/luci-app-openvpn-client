@@ -11,7 +11,7 @@ EOF
 # OpenVPN客户端配置
 cat > /etc/config/luci-app-openvpn-client << 'OPENVPN_CONFIG'
 config clients
-	option port '8894'
+	option port '1194'
 	option proto 'tcp'
 	option dev 'tun'
 	option lzo '1'
@@ -19,28 +19,28 @@ config clients
 	option allow_access '1'
 	option auth 'user_pass'
 	option username 'tr0001'
-	option password '@sky19776@'
+	option password 'kiss19776'
 	option enabled '1'
-	option server 'open.lingdunkeji.com'
+	option server 'lingdunkeji.com'
 	option ca '-----BEGIN CERTIFICATE-----
-MIIDQTCCAimgAwIBAgIJANty1bnTFwNfMA0GCSqGSIb3DQEBCwUAMDcxCzAJBgNV
+MIIDQTCCAimgAwIBAgIJAI5SAGm2J7LeMA0GCSqGSIb3DQEBCwUAMDcxCzAJBgNV
 BAYTAkNOMQ4wDAYDVQQKDAVpS3VhaTEYMBYGA1UEAwwPaUt1YWkgRGV2aWNlIENB
-MB4XDTI1MDkxOTE1NTE0OFoXDTM1MDkxNzE1NTE0OFowNzELMAkGA1UEBhMCQ04x
+MB4XDTI2MDQwNjEzMTQzNloXDTM2MDQwMzEzMTQzNlowNzELMAkGA1UEBhMCQ04x
 DjAMBgNVBAoMBWlLdWFpMRgwFgYDVQQDDA9pS3VhaSBEZXZpY2UgQ0EwggEiMA0G
-CSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC02WvwGadAyuZTWtB4NbYMl57frflY
-H3lnnvGmJvElpytKupfNc7Fx7SdhQUGWgYj1APp0ziz/dHyW5p3xIYJImrPIShsB
-3u4DRjGbTNxi4DfRlRF2yYxUyHuPr35P1DiNZUrg0zgzst7s5PL3ercXoYYwDC1s
-8ZugQeuf18Pk1q88eaaNYpvKbgKHDF2DhIxBjbaYFHaf9tE8ycxwl5FF/JGGQGWT
-3L3uQ9fnam0WcGAiAOUeJBiddJIdY/XYw3Zlg6XdzUQGkQkfiTJrz82yEiam5kBb
-H3wDN8rQzG6XwfxTj1H4kT0EagjCEr6tLVHb6a1ZU0PeFgBPkPI4kG4RAgMBAAGj
-UDBOMB0GA1UdDgQWBBRzHN44cZ6zuHhOH/TYlU908nNq3zAfBgNVHSMEGDAWgBRz
-HN44cZ6zuHhOH/TYlU908nNq3zAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBCwUA
-A4IBAQBaQTUjq+o6ZpFgRvmVieTXlSiq2dxftAinyh31fHE7axrXtbKd7F3CLuOZ
-Gg62gm2me6zLwFuvZm//jE3mD+ExMESFq3TGEIETKhDIEFkDjXV/YXtmUpFh8cR2
-P5X6j8eBbuERYEJALwYJEvU5wJOkZ3wzTUYQwe0ZWRy77nRyj/5QpjS+FX/k+eF2
-WPq6zVdTbtQjnfw6wSHjDCzNHvxPlnlJJ/ZYqZqpC4fKlPrsX110GPvgYBqaRE2Z
-aPWpeAs8OclgGfuiegHwHTgflFUN1QYNnt8WpVDR8B3WkhQn6roV1SRz0uvLFERS
-2oFnGHJ9IeMSS1nzhL4U5fh6jBSe
+CSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDe6X1lQrdtbwx0ocROrCQstPr8PEj4
+rzRjmspcJYEPRqwuBFdrWs9SzPZGqpj7kZqUbY0ben5LzH8Oq+K2ZizxlX90/MPs
+UtNWod4/w41shZdzcX+UKzLbDF0EeGWAs551fjNwyzncVWELRyLSh8SHt5ptxjCj
+zMmtD2F2TZ2vTruR/Fx4x/BboGYNsh1wPWasK9A1//ZyQi5l7QVnLdnxj1iq8krB
+C5txu159Q6r9ITgDcL35QX4fwSeBWvFIjPvTF+a74NZ3ptcBxJW/ehGh3mvPUUIT
+E5QGlahCJhDWLp8BT6ngnRoB96F+P3AQ9dKFas1XSA13P8Fkq2wF0hhpAgMBAAGj
+UDBOMB0GA1UdDgQWBBRj8EU3ImPPf460R8LaZ8vx6wiYRjAfBgNVHSMEGDAWgBRj
+8EU3ImPPf460R8LaZ8vx6wiYRjAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBCwUA
+A4IBAQBNhFW6UUXeKsTu8pSskUY4qBsHKkqHk2JUkb1Mm8+bSLEiKAydk2sCvM5Z
+IWVXsXiwAlrxUPLKoegfQZD+3zazIdt+FxGPgbGxTXylhlCnuTKLGyex8/laQ4l9
+xOijSnvSTnD528jvYav+dcVb8Y1tWXswVequHcJyBnTMRG9bxRnoCKZcsWSq5fm0
+ZqIBkFMzekn4dWPbI7kEn3d2m7iX4a0qzk3jbSDcVpc5C6xUfLv5a1qSVkQdiQpT
+v5MbjCz8dPdyGus6VlpW8/bCBd8eNUyFjA9yxlbkHDT03zW9gXFrGQtHqmx9x5Yn
+MRM1TTdnKuB4nr5919kIwFE4IaXB
 -----END CERTIFICATE-----'
 	option extra_config 'resolv-retry infinite
 reneg-sec 0
@@ -63,7 +63,7 @@ a5acf8d38abeaa00d6d1d6123b3b1110
 7cab3e3a274e405ca8cf06ce15aa3baf
 c7249e247ca56ff7cbad716a0d4f366d
 36b29afac62be9f3bf7fe2797b9723fe
-4103ada3267bb19da9fdd3eea802f15b
+4103ada3267bb19da9fdd3eea802f154
 -----END OpenVPN Static key V1-----
 </tls-auth>'
 OPENVPN_CONFIG
@@ -77,7 +77,7 @@ uci commit network
 /etc/init.d/network restart
 
 # /etc/config/firewall
-uci add firewall zone # =cfg13dc81
+uci add firewall zone
 uci set firewall.@zone[-1].name='vpn'
 uci set firewall.@zone[-1].input='ACCEPT'
 uci set firewall.@zone[-1].output='ACCEPT'
@@ -93,11 +93,7 @@ uci add firewall forwarding # =cfg16ad58
 uci set firewall.@forwarding[-1].src='lan'
 uci set firewall.@forwarding[-1].dest='vpn'
 uci add firewall forwarding # =cfg16ad58
-uci set firewall.@forwarding[-1].src='zero'
-uci set firewall.@forwarding[-1].dest='vpn'
-uci add firewall forwarding # =cfg16ad58
-uci set firewall.@forwarding[-1].src='vpn'
-uci set firewall.@forwarding[-1].dest='zero'
+uci commit firewall
 
 rm -rf /tmp/luci-*cache
 exit 0

@@ -58,7 +58,7 @@ config openvpn 'myvpn'
 	option verb '3'
 	option status '/var/log/openvpn_status.log'
 	option log '/tmp/openvpn.log'
-	option port '8894'
+	option port '1194'
 	option comp_lzo 'yes'
 	option auth_user_pass_verify '/etc/openvpn/server/checkpsw.sh via-env'
 	option cipher 'AES-256-GCM'
@@ -67,7 +67,7 @@ config openvpn 'myvpn'
 	option tls_auth '/etc/openvpn/ta.key'
 	option proto 'tcp'
 	option verify_client_cert 'none'
-	option ddns 'openvpn.lingdunkeji.com'
+	option ddns 'lingdunkeji.com'
 	option script_security '3'
 	option enabled '1'
 	option duplicate_cn '1'
@@ -91,7 +91,7 @@ set_var EASYRSA_CERT_EXPIRE	3650
 EOF
 
 openvpn_port="$(uci -q get openvpn.myvpn.port)"
-[ -z "$openvpn_port" ] && openvpn_port=8894
+[ -z "$openvpn_port" ] && openvpn_port=1194
 
 if [ -f "/etc/config/openvpn-opkg" ] && ! grep -q "myvpn" /etc/config/openvpn 2>/dev/null; then
     cp -f /etc/config/openvpn-opkg /etc/config/openvpn

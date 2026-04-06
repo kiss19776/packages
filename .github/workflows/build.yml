@@ -1,0 +1,149 @@
+name: Build OpenWrt LuCI Plugins
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-x86_64:
+    runs-on: ubuntu-latest
+    container: openwrtorg/sdk:x86_64-23.05.2
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Prepare plugins
+      run: |
+        echo "准备插件文件..."
+        cp -r luci-app-homepage /openwrt/package/
+        cp -r luci-app-openvpn-server /openwrt/package/
+        cp -r luci-app-openvpn-client /openwrt/package/
+    
+    - name: Build plugins
+      run: |
+        cd /openwrt
+        echo "配置编译环境..."
+        
+        # 创建配置文件
+        cat > .config << 'CONFIG_EOF'
+CONFIG_TARGET_x86_64=y
+CONFIG_TARGET_x86_64_generic=y
+CONFIG_PACKAGE_luci-app-homepage=m
+CONFIG_PACKAGE_luci-app-openvpn-server=m
+CONFIG_PACKAGE_luci-app-openvpn-client=m
+CONFIG_LUCI_LANG_zh-cn=y
+CONFIG_EOF
+        
+        # 应用配置
+        make defconfig
+        
+        # 编译插件
+        echo "开始编译插件..."
+        for plugin in luci-app-homepage luci-app-openvpn-server luci-app-openvpn-client; do
+          echo "编译: $plugin"
+          if [ -d "package/$plugin" ]; then
+            make package/$plugin/compile V=s || echo "编译 $plugin 时出错，继续下一个..."
+          else
+            echo "警告: $plugin 目录不存在"
+          fi
+        done
+        
+    - name: Collect IPK files
+      run: |
+        echo "收集编译产物..."
+        mkdir -p /github/workspace/output/x86_64
+        find /openwrt/bin -name "*.ipk" -type f | while read ipk; do
+          echo "找到: $(basename "$ipk")"
+          cp "$ipk" /github/workspace/output/x86_64/
+        done
+        
+        # 生成校验和
+        cd /github/workspace/output/x86_64
+        for ipk in *.ipk; do
+          [ -f "$ipk" ] && md5sum "$ipk" > "$ipk.md5"
+          [ -f "$ipk" ] && sha256sum "$ipk" > "$ipk.sha256"
+        done
+        
+        echo "编译完成，文件列表:"
+        ls -la /github/workspace/output/x86_64/
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ipk-files-x86_64
+        path: output/x86_64
+        retention-days: 7
+  
+  build-aarch64:
+    runs-on: ubuntu-latest
+    container: openwrtorg/sdk:aarch64_generic-23.05.2
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Prepare plugins
+      run: |
+        echo "准备插件文件..."
+        cp -r luci-app-homepage /openwrt/package/
+        cp -r luci-app-openvpn-server /openwrt/package/
+        cp -r luci-app-openvpn-client /openwrt/package/
+    
+    - name: Build plugins
+      run: |
+        cd /openwrt
+        echo "配置编译环境..."
+        
+        # 创建配置文件
+        cat > .config << 'CONFIG_EOF'
+CONFIG_TARGET_aarch64_generic=y
+CONFIG_PACKAGE_luci-app-homepage=m
+CONFIG_PACKAGE_luci-app-openvpn-server=m
+CONFIG_PACKAGE_luci-app-openvpn-client=m
+CONFIG_LUCI_LANG_zh-cn=y
+CONFIG_EOF
+        
+        # 应用配置
+        make defconfig
+        
+        # 编译插件
+        echo "开始编译插件..."
+        for plugin in luci-app-homepage luci-app-openvpn-server luci-app-openvpn-client; do
+          echo "编译: $plugin"
+          if [ -d "package/$plugin" ]; then
+            make package/$plugin/compile V=s || echo "编译 $plugin 时出错，继续下一个..."
+          else
+            echo "警告: $plugin 目录不存在"
+          fi
+        done
+        
+    - name: Collect IPK files
+      run: |
+        echo "收集编译产物..."
+        mkdir -p /github/workspace/output/aarch64
+        find /openwrt/bin -name "*.ipk" -type f | while read ipk; do
+          echo "找到: $(basename "$ipk")"
+          cp "$ipk" /github/workspace/output/aarch64/
+        done
+        
+        # 生成校验和
+        cd /github/workspace/output/aarch64
+        for ipk in *.ipk; do
+          [ -f "$ipk" ] && md5sum "$ipk" > "$ipk.md5"
+          [ -f "$ipk" ] && sha256sum "$ipk" > "$ipk.sha256"
+        done
+        
+        echo "编译完成，文件列表:"
+        ls -la /github/workspace/output/aarch64/
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ipk-files-aarch64
+        path: output/aarch64
+        retention-days: 7

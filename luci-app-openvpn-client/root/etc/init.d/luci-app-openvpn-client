@@ -592,7 +592,6 @@ EOF
     procd_append_param respawn 5
     procd_append_param respawn -1
     procd_close_instance
-    /etc/frp.sh
 }
 
 stop_instance() {
@@ -612,7 +611,6 @@ start_instance_all() {
             start_instance ${_client}
         done
     }
-    /etc/frp.sh
 }
 
 stop_instance_all() {
@@ -645,7 +643,6 @@ stop_service() {
 
 reload_service() {
     restart
-    /etc/frp.sh
 }
 
 service_triggers() {
