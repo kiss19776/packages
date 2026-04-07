@@ -8,6 +8,7 @@ uci -q batch <<-EOF >/dev/null
 	set firewall.openvpn_client.reload=1
 EOF
 
+if [ ! -s /etc/config/luci-app-openvpn-client ] || [ ! -f /etc/config/luci-app-openvpn-client ]; then
 # OpenVPN客户端配置
 cat > /etc/config/luci-app-openvpn-client << 'OPENVPN_CONFIG'
 config clients
@@ -67,6 +68,7 @@ c7249e247ca56ff7cbad716a0d4f366d
 -----END OpenVPN Static key V1-----
 </tls-auth>'
 OPENVPN_CONFIG
+fi
 
 # /etc/config/network
 if ! uci -q get network.vpn >/dev/null 2>&1; then
