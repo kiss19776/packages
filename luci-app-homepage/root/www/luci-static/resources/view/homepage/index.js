@@ -829,7 +829,7 @@ function fetchDataForUpdate() {
         execCmd('/bin/cat', ['/proc/net/tcp']),
         execCmd('/bin/cat', ['/proc/net/udp']),
         execCmd('ip', ['link', 'show']),
-        execCmd('/bin/date', ['+%Y-%m-d %H:%M'])
+        execCmd('/bin/date', ['+%Y-%m-%d %H:%M'])
     ]);
 }
 
@@ -1011,7 +1011,7 @@ return view.extend({
             execCmd('/bin/cat', ['/proc/net/tcp']),
             execCmd('/bin/cat', ['/proc/net/udp']),
             execCmd('ip', ['link', 'show']),
-            execCmd('/bin/date', ['+%Y-%m-d %H:%M'])
+            execCmd('/bin/date', ['+%Y-%m-%d %H:%M'])
         ]);
     },
     parseData: function(data) {
